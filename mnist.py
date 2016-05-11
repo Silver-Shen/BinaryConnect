@@ -47,9 +47,8 @@ if __name__ == "__main__":
     
     # BN parameters
     batch_size = 100
-    print("batch_size = "+str(batch_size))
-    # alpha is the exponential moving average factor
-    alpha = .15
+    print("batch_size = "+str(batch_size))    
+    alpha = .15 # alpha is the exponential moving average factor
     print("alpha = "+str(alpha))
     epsilon = 1e-4
     print("epsilon = "+str(epsilon))
@@ -75,8 +74,7 @@ if __name__ == "__main__":
     print("binary = "+str(binary))
     stochastic = True
     print("stochastic = "+str(stochastic))
-    # (-H,+H) are the two binary values
-    # H = "Glorot"
+    # (-H,+H) are the two binary values    
     H = 1.
     print("H = "+str(H))
     # W_LR_scale = 1.    
@@ -126,13 +124,9 @@ if __name__ == "__main__":
     target = T.matrix('targets')
     LR = T.scalar('LR', dtype=theano.config.floatX)
 
-    mlp = lasagne.layers.InputLayer(
-            shape=(None, 1, 28, 28),
-            input_var=input)
+    mlp = lasagne.layers.InputLayer(shape=(None, 1, 28, 28), input_var=input)
 
-    mlp = lasagne.layers.DropoutLayer(
-            mlp, 
-            p=dropout_in)
+    mlp = lasagne.layers.DropoutLayer(mlp, p=dropout_in)
     
     for k in range(n_hidden_layers):
 
@@ -173,13 +167,12 @@ if __name__ == "__main__":
     # squared hinge loss
     loss = T.mean(T.sqr(T.maximum(0.,1.-target*train_output)))
     
-    if binary:
-        
+    if binary:        
         # W updates
         W = lasagne.layers.get_all_params(mlp, binary=True)
-        W_grads = binary_connect.compute_grads(loss,mlp)
+        W_grads = binary_connect.compute_grads(loss, mlp)
         updates = lasagne.updates.adam(loss_or_grads=W_grads, params=W, learning_rate=LR)
-        updates = binary_connect.clipping_scaling(updates,mlp)
+        updates = binary_connect.clipping_scaling(updates, mlp)
         
         # other parameters updates
         params = lasagne.layers.get_all_params(mlp, trainable=True, binary=False)
