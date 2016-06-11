@@ -20,8 +20,8 @@ from collections import OrderedDict
 import numpy as np
 
 # specifying the gpu to use
-# import theano.sandbox.cuda
-# theano.sandbox.cuda.use('gpu1') 
+import theano.sandbox.cuda
+theano.sandbox.cuda.use('gpu1') 
 import theano
 import theano.tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
@@ -110,30 +110,41 @@ class Conv2DLayer(lasagne.layers.Conv2DLayer):
             
         self._srng = RandomStreams(lasagne.random.get_rng().randint(1, 2147462579))
             
-        if self.binary:
+        if self.binary:            
             super(Conv2DLayer, self).__init__(incoming, num_filters, filter_size, W=lasagne.init.Uniform((-self.H,self.H)), **kwargs)   
             # add the binary tag to weights            
             self.params[self.W]=set(['binary'])
         else:
             super(Conv2DLayer, self).__init__(incoming, num_filters, filter_size, **kwargs)    
     
-    def convolve(self, input, deterministic=False, **kwargs):        
-        self.Wb = binarization(self.W, self.H, self.binary, deterministic, self.stochastic, self._srng)
-        Wr = self.W
-        self.W = self.Wb
+    # def convolve(self, input, deterministic=False, **kwargs):        
+    #     self.Wb = binarization(self.W, self.H, self.binary, deterministic, self.stochastic, self._srng)
+    #     Wr = self.W
+    #     self.W = self.Wb
             
-        rvalue = super(Conv2DLayer, self).convolve(input, **kwargs)
+    #     rvalue = super(Conv2DLayer, self).convolve(input, **kwargs)
         
-        self.W = Wr        
+    #     self.W = Wr        
+    #     return rvalue
+
+    # Experimental Function
+    def get_output_for(self, input, deterministic=False, **kwargs):       
+        #self.W = theano.printing.Print('Float weight: ')(self.W)         
+        self.Wb = binarization(self.W, self.H, self.binary, deterministic, self.stochastic, self._srng)        
+        Wr = self.W # backup the precise value of weight
+        self.W = self.Wb
+        #self.W = theano.printing.Print('Binary weight: ')(self.W)
+        rvalue = super(Conv2DLayer, self).get_output_for(input, **kwargs)        
+        self.W = Wr # restore weight        
         return rvalue
 
 # This function computes the gradient of the binary weights
-def compute_grads(loss, network):        
+def compute_grads(loss, network):
     layers = lasagne.layers.get_all_layers(network)
     grads = []
     
-    for layer in layers:    
-        params = layer.get_params(binary = True)
+    for layer in layers:
+        params = layer.get_params(binary = True)                
         if params:            
             grads.append(theano.grad(loss, wrt=layer.Wb))
 
@@ -162,9 +173,10 @@ def train(train_fn,val_fn,
             batch_size,
             LR_start,LR_decay,
             num_epochs,
+            val_interval,
             X_train,y_train,
             X_val,y_val,
-            X_test,y_test):
+            X_test=None,y_test=None):
     
     # A function which shuffles a dataset
     def shuffle(X, y):    
@@ -181,30 +193,33 @@ def train(train_fn,val_fn,
     # This function trains the model a full epoch (on the whole dataset)
     def train_epoch(X, y, LR):        
         loss = 0
-        batches = len(X)/batch_size        
-        for i in range(batches):
-            loss += train_fn(X[i*batch_size:(i+1)*batch_size], y[i*batch_size:(i+1)*batch_size], LR)        
+        batches = len(X)/batch_size                
+        for i in range(batches):            
+            output, new_loss = train_fn(X[i*batch_size:(i+1)*batch_size], y[i*batch_size:(i+1)*batch_size], LR)            
+            loss += new_loss
 
         loss /= batches        
         return loss
     
     # This function tests the model a full epoch (on the whole dataset)
     def val_epoch(X, y):        
-        err = 0
+        #err = 0
         loss = 0
         batches = len(X)/batch_size        
         for i in range(batches):
-            new_loss, new_err = val_fn(X[i*batch_size:(i+1)*batch_size], y[i*batch_size:(i+1)*batch_size])
-            err += new_err
+            #new_loss, new_err = val_fn(X[i*batch_size:(i+1)*batch_size], y[i*batch_size:(i+1)*batch_size])
+            new_output, new_loss = val_fn(X[i*batch_size:(i+1)*batch_size], y[i*batch_size:(i+1)*batch_size])           
+            #err += new_err
             loss += new_loss
         
-        err = err / batches * 100
+        #err = err / batches * 100
         loss /= batches
-        return err, loss
+        #return err, loss
+        return loss
     
     # shuffle the train set
     X_train, y_train = shuffle(X_train,y_train)
-    best_val_err = 100
+    #best_val_err = 100
     best_epoch = 1
     LR = LR_start
     
@@ -215,13 +230,16 @@ def train(train_fn,val_fn,
         train_loss = train_epoch(X_train, y_train, LR)
         X_train,y_train = shuffle(X_train, y_train)
         
-        val_err, val_loss = val_epoch(X_val,y_val)
+        #val_err, val_loss = val_epoch(X_val,y_val)
+        if (epoch % val_interval == 0):
+            val_loss = val_epoch(X_val, y_val)
         
         # test if validation error went down
-        if val_err <= best_val_err:            
-            best_val_err = val_err
-            best_epoch = epoch+1            
-            test_err, test_loss = val_epoch(X_test, y_test)
+        # if val_err <= best_val_err:            
+        #     best_val_err = val_err
+        #     best_epoch = epoch + 1          
+        #     if X_test != None:
+        #         test_err, test_loss = val_epoch(X_test, y_test)                
         
         epoch_duration = time.time() - start_time
         
@@ -229,12 +247,14 @@ def train(train_fn,val_fn,
         print("Epoch "+str(epoch + 1)+" of "+str(num_epochs)+" took "+str(epoch_duration)+"s")
         print("  LR:                            "+str(LR))
         print("  training loss:                 "+str(train_loss))
-        print("  validation loss:               "+str(val_loss))
-        print("  validation error rate:         "+str(val_err)+"%")
-        print("  best epoch:                    "+str(best_epoch))
-        print("  best validation error rate:    "+str(best_val_err)+"%")
-        print("  test loss:                     "+str(test_loss))
-        print("  test error rate:               "+str(test_err)+"%") 
+        if (epoch % val_interval == 0):
+            print("  validation loss:               "+str(val_loss))
+        #print("  validation error rate:         "+str(val_err)+"%")
+        #print("  best epoch:                    "+str(best_epoch))
+        #print("  best validation error rate:    "+str(best_val_err)+"%")
+        if X_test != None and y_test != None:
+            print("  test loss:                     "+str(test_loss))
+            print("  test error rate:               "+str(test_err)+"%") 
         
         # decay the LR
         LR *= LR_decay

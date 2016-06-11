@@ -98,7 +98,7 @@ if __name__ == "__main__":
     
     # bc01 format
     # print train_set.X.shape
-    train_set.X = train_set.X.reshape(-1, 1, 28, 28)
+    train_set.X = train_set.X.reshape(-1, 1, 28, 28)    
     valid_set.X = valid_set.X.reshape(-1, 1, 28, 28)
     test_set.X = test_set.X.reshape(-1, 1, 28, 28)
     
